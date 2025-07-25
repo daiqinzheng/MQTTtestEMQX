@@ -60,4 +60,6 @@ dependencies {
     // Paho MQTT 客户端库，用于处理 MQTT 通信
     implementation("org.eclipse.paho:org.eclipse.paho.android.service:1.1.1")
     implementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
+    // 为 Paho 库提供其依赖的 LocalBroadcastManager
+    implementation("androidx.localbroadcastmanager:localbroadcastmanager:1.1.0")
 }
