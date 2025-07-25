@@ -28,13 +28,6 @@
             </intent-filter>
         </activity>
 
-        <!--
-            这是解决 SecurityException 的关键！
-            为 Paho 库的 MqttService 明确指定 exported="false"
-        -->
-        <service
-            android:name="org.eclipse.paho.android.service.MqttService"
-            android:exported="false" />
 
     </application>
 

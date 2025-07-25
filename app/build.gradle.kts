@@ -18,6 +18,11 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    packaging {
+        resources.excludes.add("META-INF/INDEX.LIST")
+        resources.excludes.add("META-INF/io.netty.versions.properties") // <-- 新增这一行
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -58,8 +63,11 @@ dependencies {
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
     // Paho MQTT 客户端库，用于处理 MQTT 通信
-    implementation("org.eclipse.paho:org.eclipse.paho.android.service:1.1.1")
-    implementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
-    // 为 Paho 库提供其依赖的 LocalBroadcastManager
-    implementation("androidx.localbroadcastmanager:localbroadcastmanager:1.1.0")
+//    implementation("org.eclipse.paho:org.eclipse.paho.android.service:1.1.1")
+//    implementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
+//    // 为 Paho 库提供其依赖的 LocalBroadcastManager
+//    implementation("androidx.localbroadcastmanager:localbroadcastmanager:1.1.0")
+
+    // 2. 添加 HiveMQ 客户端库
+    implementation("com.hivemq:hivemq-mqtt-client:1.3.0")
 }

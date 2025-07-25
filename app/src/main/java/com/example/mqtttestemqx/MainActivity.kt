@@ -1,6 +1,5 @@
 package com.example.mqtttestemqx
 
-import android.content.Context
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -27,6 +26,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,22 +35,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.example.mqtttestemqx.ui.theme.MQTTtestEMQXTheme
+import com.hivemq.client.mqtt.MqttClient
+import com.hivemq.client.mqtt.mqtt5.Mqtt5AsyncClient
+import com.hivemq.client.mqtt.mqtt5.message.publish.Mqtt5Publish
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import org.eclipse.paho.android.service.MqttAndroidClient
-import org.eclipse.paho.client.mqttv3.IMqttActionListener
-import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken
-import org.eclipse.paho.client.mqttv3.IMqttToken
-import org.eclipse.paho.client.mqttv3.MqttCallbackExtended
-import org.eclipse.paho.client.mqttv3.MqttConnectOptions
-import org.eclipse.paho.client.mqttv3.MqttException
-import org.eclipse.paho.client.mqttv3.MqttMessage
+import java.util.UUID
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -65,20 +63,17 @@ class MainActivity : ComponentActivity() {
 }
 
 /**
- * MqttManager 类用于封装所有 MQTT 相关的操作
+ * MqttManager 类，使用现代的 HiveMQ 客户端重写
  */
-class MqttManager(private val context: Context) {
+class MqttManager {
     // --- MQTT 连接信息 ---
-    private val serverUri = "ssl://tf01696e.ala.cn-hangzhou.emqxsl.cn:8883"
-    private val clientId = "Android_Client_${System.currentTimeMillis()}"
+    private val serverHost = "tf01696e.ala.cn-hangzhou.emqxsl.cn"
+    private val serverPort = 8883
     private val topic = "test/topic/from/android"
 
-    // =================================================================
-    //  重要：请在这里填入您在 EMQX Cloud 控制台获取的用户名和密码
-    // =================================================================
+    // --- 使用我们测试成功的全新凭证 ---
     private val username = "kukudai"
     private val password = "123456"
-    // =================================================================
 
     // --- 状态管理 ---
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
@@ -87,113 +82,74 @@ class MqttManager(private val context: Context) {
     private val _receivedMessages = MutableStateFlow<List<String>>(emptyList())
     val receivedMessages = _receivedMessages.asStateFlow()
 
-    private lateinit var mqttClient: MqttAndroidClient
+    private var client: Mqtt5AsyncClient? = null
 
     companion object {
-        private const val TAG = "MqttManager"
+        private const val TAG = "MqttManager_HiveMQ"
     }
 
-    // 定义连接状态的枚举
     enum class ConnectionState {
         DISCONNECTED, CONNECTING, CONNECTED, FAILED
-    }
-
-    init {
-        setupMqttClient()
-    }
-
-    /**
-     * 初始化 MQTT 客户端并设置回调
-     */
-    private fun setupMqttClient() {
-        mqttClient = MqttAndroidClient(context, serverUri, clientId)
-        mqttClient.setCallback(object : MqttCallbackExtended {
-            override fun connectComplete(reconnect: Boolean, serverURI: String?) {
-                _connectionState.value = ConnectionState.CONNECTED
-                Log.d(TAG, "连接成功! Server: $serverURI, Reconnect: $reconnect")
-                // 连接成功后订阅主题
-                subscribeToTopic()
-            }
-
-            override fun connectionLost(cause: Throwable?) {
-                _connectionState.value = ConnectionState.FAILED
-                Log.e(TAG, "连接丢失: ${cause?.message}", cause)
-            }
-
-            override fun messageArrived(topic: String?, message: MqttMessage?) {
-                val msg = "收到消息: ${message.toString()} (来自: $topic)"
-                Log.d(TAG, msg)
-                val currentMessages = _receivedMessages.value.toMutableList()
-                currentMessages.add(0, msg) // 在列表顶部插入新消息
-                _receivedMessages.value = currentMessages
-            }
-
-            override fun deliveryComplete(token: IMqttDeliveryToken?) {
-                Log.d(TAG, "消息发送成功!")
-            }
-        })
     }
 
     /**
      * 连接到 MQTT Broker
      */
     fun connect() {
-        if (mqttClient.isConnected) {
+        if (client != null && client?.state?.isConnectedOrReconnect == true) {
             Log.w(TAG, "客户端已经连接，无需重复操作")
             return
         }
+
         _connectionState.value = ConnectionState.CONNECTING
 
-        val connectOptions = MqttConnectOptions().apply {
-            isAutomaticReconnect = true
-            isCleanSession = true
-            // --- 添加用户名和密码 ---
-            this.userName = this@MqttManager.username
-            this.password = this@MqttManager.password.toCharArray()
-        }
-
-        try {
-            mqttClient.connect(connectOptions, null, object : IMqttActionListener {
-                override fun onSuccess(asyncActionToken: IMqttToken?) {
-                    // 连接成功后的逻辑在 MqttCallbackExtended.connectComplete 中处理
-                    Log.d(TAG, "connect() 调用成功，等待回调...")
-                }
-
-                override fun onFailure(asyncActionToken: IMqttToken?, exception: Throwable?) {
+        // 使用 HiveMQ 客户端构建器
+        client = MqttClient.builder()
+            .useMqttVersion5()
+            .serverHost(serverHost)
+            .serverPort(serverPort)
+            .sslWithDefaultConfig() // 启用 SSL
+            .identifier(UUID.randomUUID().toString())
+            .addConnectedListener { Log.d(TAG, "客户端已连接") }
+            .addDisconnectedListener { context ->
+                // 仅在非用户主动断开时标记为失败
+                if (context.cause != null && _connectionState.value != ConnectionState.DISCONNECTED) {
                     _connectionState.value = ConnectionState.FAILED
-                    Log.e(TAG, "连接失败: ${exception?.message}", exception)
                 }
-            })
-        } catch (e: MqttException) {
-            _connectionState.value = ConnectionState.FAILED
-            Log.e(TAG, "连接时发生异常: ${e.message}", e)
-        }
+                Log.e(TAG, "客户端断开连接: ${context.cause}", context.cause)
+            }
+            .buildAsync() // 异步构建
+
+        // 连接并处理结果
+        client?.connectWith()
+            ?.simpleAuth()
+            ?.username(username)
+            ?.password(password.toByteArray())
+            ?.applySimpleAuth()
+            ?.send()
+            ?.whenComplete { _, throwable ->
+                if (throwable != null) {
+                    _connectionState.value = ConnectionState.FAILED
+                    Log.e(TAG, "连接失败: ${throwable.message}", throwable)
+                } else {
+                    _connectionState.value = ConnectionState.CONNECTED
+                    Log.d(TAG, "连接成功!")
+                    subscribeToTopic()
+                }
+            }
     }
 
     /**
      * 断开连接
      */
     fun disconnect() {
-        if (!mqttClient.isConnected) {
-            Log.w(TAG, "客户端已经断开，无需重复操作")
-            return
-        }
-        try {
-            mqttClient.disconnect(null, object : IMqttActionListener {
-                override fun onSuccess(asyncActionToken: IMqttToken?) {
-                    _connectionState.value = ConnectionState.DISCONNECTED
-                    Log.d(TAG, "成功断开连接")
-                }
-
-                override fun onFailure(asyncActionToken: IMqttToken?, exception: Throwable?) {
-                    Log.e(TAG, "断开连接失败: ${exception?.message}", exception)
-                    // 即使失败，也更新状态为断开
-                    _connectionState.value = ConnectionState.DISCONNECTED
-                }
-            })
-        } catch (e: MqttException) {
-            Log.e(TAG, "断开连接时发生异常: ${e.message}", e)
-            _connectionState.value = ConnectionState.DISCONNECTED
+        _connectionState.value = ConnectionState.DISCONNECTED // 立即更新UI状态
+        client?.disconnect()?.whenComplete { _, throwable ->
+            if (throwable != null) {
+                Log.e(TAG, "断开连接时发生错误", throwable)
+            } else {
+                Log.d(TAG, "成功断开连接")
+            }
         }
     }
 
@@ -201,24 +157,21 @@ class MqttManager(private val context: Context) {
      * 发布消息
      */
     fun publishMessage(message: String) {
-        if (!mqttClient.isConnected) {
+        if (client?.state?.isConnected != true) {
             Log.e(TAG, "无法发布消息，客户端未连接")
             return
         }
-        try {
-            val mqttMessage = MqttMessage(message.toByteArray())
-            mqttClient.publish(topic, mqttMessage, null, object : IMqttActionListener {
-                override fun onSuccess(asyncActionToken: IMqttToken?) {
-                    // 消息成功放入发送队列，等待 deliveryComplete 回调
-                    Log.d(TAG, "消息 '$message' 已发布到主题 '$topic'")
-                }
-
-                override fun onFailure(asyncActionToken: IMqttToken?, exception: Throwable?) {
-                    Log.e(TAG, "发布消息失败: ${exception?.message}", exception)
-                }
-            })
-        } catch (e: MqttException) {
-            Log.e(TAG, "发布消息时发生异常: ${e.message}", e)
+        client?.publish(
+            Mqtt5Publish.builder()
+                .topic(topic)
+                .payload(message.toByteArray())
+                .build()
+        )?.whenComplete { result, throwable ->
+            if (throwable != null) {
+                Log.e(TAG, "发布消息失败", throwable)
+            } else {
+                Log.d(TAG, "消息发布成功: $result")
+            }
         }
     }
 
@@ -226,38 +179,46 @@ class MqttManager(private val context: Context) {
      * 订阅主题
      */
     private fun subscribeToTopic() {
-        try {
-            mqttClient.subscribe(topic, 1, null, object : IMqttActionListener {
-                override fun onSuccess(asyncActionToken: IMqttToken?) {
+        client?.subscribeWith()
+            ?.topicFilter(topic)
+            ?.callback { publish ->
+                val msg = "收到消息: ${String(publish.payloadAsBytes)} (来自: ${publish.topic})"
+                Log.d(TAG, msg)
+                _receivedMessages.value = listOf(msg) + _receivedMessages.value
+            }
+            ?.send()
+            ?.whenComplete { _, throwable ->
+                if (throwable != null) {
+                    Log.e(TAG, "订阅主题失败", throwable)
+                } else {
                     Log.d(TAG, "成功订阅主题: $topic")
                 }
-
-                override fun onFailure(asyncActionToken: IMqttToken?, exception: Throwable?) {
-                    Log.e(TAG, "订阅主题失败: ${exception?.message}", exception)
-                }
-            })
-        } catch (e: MqttException) {
-            Log.e(TAG, "订阅主题时发生异常: ${e.message}", e)
-        }
+            }
     }
 }
 
-
-/**
- * 主界面 Composable
- */
 @Composable
 fun MqttDemoScreen() {
-    // 获取当前上下文
-    val context = LocalContext.current
-    // 使用 remember 创建并保留 MqttManager 实例
-    val mqttManager = remember { MqttManager(context) }
+    val mqttManager = remember { MqttManager() }
+    val lifecycleOwner = LocalLifecycleOwner.current
 
-    // 收集状态
+    // 使用 DisposableEffect 来管理连接的生命周期，防止内存泄漏
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_DESTROY) {
+                mqttManager.disconnect()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            mqttManager.disconnect()
+        }
+    }
+
     val connectionState by mqttManager.connectionState.collectAsState()
     val receivedMessages by mqttManager.receivedMessages.collectAsState()
-
-    // UI 状态
     var messageText by remember { mutableStateOf("") }
 
     Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
@@ -268,37 +229,28 @@ fun MqttDemoScreen() {
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // 标题
-            Text("MQTT Demo (EMQX)", style = MaterialTheme.typography.headlineMedium)
+            Text("MQTT Demo (HiveMQ)", style = MaterialTheme.typography.headlineMedium)
             Spacer(modifier = Modifier.height(16.dp))
-
-            // 连接状态
             ConnectionStatus(state = connectionState)
             Spacer(modifier = Modifier.height(16.dp))
-
-            // 连接/断开控制
             ConnectionControls(
                 state = connectionState,
                 onConnect = { mqttManager.connect() },
                 onDisconnect = { mqttManager.disconnect() }
             )
             Spacer(modifier = Modifier.height(24.dp))
-
-            // 消息发布区域
             PublishSection(
                 message = messageText,
                 onMessageChange = { messageText = it },
                 onPublish = {
                     if (messageText.isNotBlank()) {
                         mqttManager.publishMessage(messageText)
-                        messageText = "" // 清空输入框
+                        messageText = ""
                     }
                 },
                 isEnabled = connectionState == MqttManager.ConnectionState.CONNECTED
             )
             Spacer(modifier = Modifier.height(24.dp))
-
-            // 接收到的消息列表
             ReceivedMessages(messages = receivedMessages)
         }
     }
@@ -337,7 +289,7 @@ fun ConnectionControls(
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
         Button(
             onClick = onConnect,
-            enabled = state == MqttManager.ConnectionState.DISCONNECTED || state == MqttManager.ConnectionState.FAILED
+            enabled = state != MqttManager.ConnectionState.CONNECTED && state != MqttManager.ConnectionState.CONNECTING
         ) {
             Text("连 接")
         }
@@ -399,7 +351,6 @@ fun ReceivedMessages(messages: List<String>) {
         }
     }
 }
-
 
 @Preview(showBackground = true)
 @Composable
