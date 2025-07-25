@@ -57,4 +57,7 @@ dependencies {
     androidTestImplementation(libs.androidx.ui.test.junit4)
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
+    // Paho MQTT 客户端库，用于处理 MQTT 通信
+    implementation("org.eclipse.paho:org.eclipse.paho.android.service:1.1.1")
+    implementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
 }
