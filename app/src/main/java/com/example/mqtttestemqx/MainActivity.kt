@@ -69,10 +69,16 @@ class MainActivity : ComponentActivity() {
  */
 class MqttManager(private val context: Context) {
     // --- MQTT 连接信息 ---
-    // 请根据您的 EMQX 服务器信息修改
     private val serverUri = "ssl://tf01696e.ala.cn-hangzhou.emqxsl.cn:8883"
     private val clientId = "Android_Client_${System.currentTimeMillis()}"
     private val topic = "test/topic/from/android"
+
+    // =================================================================
+    //  重要：请在这里填入您在 EMQX Cloud 控制台获取的用户名和密码
+    // =================================================================
+    private val username = "kukudai"
+    private val password = "123456"
+    // =================================================================
 
     // --- 状态管理 ---
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
@@ -141,8 +147,9 @@ class MqttManager(private val context: Context) {
         val connectOptions = MqttConnectOptions().apply {
             isAutomaticReconnect = true
             isCleanSession = true
-            // **已移除** -> socketFactory = SSLSocketFactory.getDefault()
-            // Paho 库会根据 "ssl://" 前缀自动处理 SSL/TLS
+            // --- 添加用户名和密码 ---
+            this.userName = this@MqttManager.username
+            this.password = this@MqttManager.password.toCharArray()
         }
 
         try {
