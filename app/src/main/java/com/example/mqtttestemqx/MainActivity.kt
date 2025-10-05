@@ -66,14 +66,12 @@ class MainActivity : ComponentActivity() {
  * MqttManager 类，使用现代的 HiveMQ 客户端重写
  */
 class MqttManager {
-    // --- MQTT 连接信息 ---
-    private val serverHost = "tf01696e.ala.cn-hangzhou.emqxsl.cn"
-    private val serverPort = 8883
-    private val topic = "test/topic/from/android"
-
-    // --- 使用我们测试成功的全新凭证 ---
-    private val username = "kukudai"
-    private val password = "123456"
+    // --- MQTT 连接信息 (现在可以动态配置) ---
+    private var serverHost = "a11331ff.ala.cn-hangzhou.emqxsl.cn"
+    private var serverPort = 8883
+    private var topic = "test/topic/from/android"
+    private var username = "kukudai"
+    private var password = "123456"
 
     // --- 状态管理 ---
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
@@ -91,6 +89,28 @@ class MqttManager {
     enum class ConnectionState {
         DISCONNECTED, CONNECTING, CONNECTED, FAILED
     }
+
+    /**
+     * 更新连接配置
+     */
+    fun updateConfig(host: String, port: Int, topic: String, user: String, pass: String) {
+        this.serverHost = host
+        this.serverPort = port
+        this.topic = topic
+        this.username = user
+        this.password = pass
+    }
+
+    /**
+     * 获取当前配置
+     */
+    fun getConfig() = mapOf(
+        "host" to serverHost,
+        "port" to serverPort.toString(),
+        "topic" to topic,
+        "username" to username,
+        "password" to password
+    )
 
     /**
      * 连接到 MQTT Broker
@@ -221,6 +241,14 @@ fun MqttDemoScreen() {
     val receivedMessages by mqttManager.receivedMessages.collectAsState()
     var messageText by remember { mutableStateOf("") }
 
+    // 配置参数状态
+    val config = mqttManager.getConfig()
+    var serverHost by remember { mutableStateOf(config["host"] ?: "") }
+    var serverPort by remember { mutableStateOf(config["port"] ?: "") }
+    var topic by remember { mutableStateOf(config["topic"] ?: "") }
+    var username by remember { mutableStateOf(config["username"] ?: "") }
+    var password by remember { mutableStateOf(config["password"] ?: "") }
+
     Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
         Column(
             modifier = Modifier
@@ -231,11 +259,44 @@ fun MqttDemoScreen() {
         ) {
             Text("MQTT Demo (HiveMQ)", style = MaterialTheme.typography.headlineMedium)
             Spacer(modifier = Modifier.height(16.dp))
+
+            // 根据连接状态显示配置输入框或配置信息
+            if (connectionState == MqttManager.ConnectionState.CONNECTED ||
+                connectionState == MqttManager.ConnectionState.CONNECTING) {
+                // 已连接或连接中：显示配置信息
+                ConfigDisplaySection(
+                    host = serverHost,
+                    port = serverPort,
+                    topic = topic,
+                    username = username
+                )
+            } else {
+                // 未连接：显示配置输入框
+                ConfigInputSection(
+                    host = serverHost,
+                    port = serverPort,
+                    topic = topic,
+                    username = username,
+                    password = password,
+                    onHostChange = { serverHost = it },
+                    onPortChange = { serverPort = it },
+                    onTopicChange = { topic = it },
+                    onUsernameChange = { username = it },
+                    onPasswordChange = { password = it }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
             ConnectionStatus(state = connectionState)
             Spacer(modifier = Modifier.height(16.dp))
             ConnectionControls(
                 state = connectionState,
-                onConnect = { mqttManager.connect() },
+                onConnect = {
+                    // 更新配置并连接
+                    val portInt = serverPort.toIntOrNull() ?: 8883
+                    mqttManager.updateConfig(serverHost, portInt, topic, username, password)
+                    mqttManager.connect()
+                },
                 onDisconnect = { mqttManager.disconnect() }
             )
             Spacer(modifier = Modifier.height(24.dp))
@@ -253,6 +314,121 @@ fun MqttDemoScreen() {
             Spacer(modifier = Modifier.height(24.dp))
             ReceivedMessages(messages = receivedMessages)
         }
+    }
+}
+
+/**
+ * 配置输入区域 - 未连接时显示
+ */
+@Composable
+fun ConfigInputSection(
+    host: String,
+    port: String,
+    topic: String,
+    username: String,
+    password: String,
+    onHostChange: (String) -> Unit,
+    onPortChange: (String) -> Unit,
+    onTopicChange: (String) -> Unit,
+    onUsernameChange: (String) -> Unit,
+    onPasswordChange: (String) -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("MQTT 配置", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(12.dp))
+
+            OutlinedTextField(
+                value = host,
+                onValueChange = onHostChange,
+                label = { Text("服务器地址") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+
+            OutlinedTextField(
+                value = port,
+                onValueChange = onPortChange,
+                label = { Text("端口") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+
+            OutlinedTextField(
+                value = topic,
+                onValueChange = onTopicChange,
+                label = { Text("订阅主题") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+
+            OutlinedTextField(
+                value = username,
+                onValueChange = onUsernameChange,
+                label = { Text("用户名") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+
+            OutlinedTextField(
+                value = password,
+                onValueChange = onPasswordChange,
+                label = { Text("密码") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+        }
+    }
+}
+
+/**
+ * 配置显示区域 - 已连接时显示
+ */
+@Composable
+fun ConfigDisplaySection(
+    host: String,
+    port: String,
+    topic: String,
+    username: String
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9))
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("当前配置", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(8.dp))
+
+            ConfigInfoRow("服务器", host)
+            ConfigInfoRow("端口", port)
+            ConfigInfoRow("主题", topic)
+            ConfigInfoRow("用户名", username)
+        }
+    }
+}
+
+@Composable
+fun ConfigInfoRow(label: String, value: String) {
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Text(
+            text = "$label: ",
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 14.sp,
+            modifier = Modifier.width(70.dp)
+        )
+        Text(
+            text = value,
+            fontSize = 14.sp,
+            color = Color(0xFF1976D2)
+        )
     }
 }
 
@@ -352,10 +528,93 @@ fun ReceivedMessages(messages: List<String>) {
     }
 }
 
-@Preview(showBackground = true)
+@Preview(showBackground = true, name = "主界面 - 默认")
 @Composable
 fun DefaultPreview() {
     MQTTtestEMQXTheme {
         MqttDemoScreen()
+    }
+}
+
+@Preview(showBackground = true, name = "连接状态 - 已连接")
+@Composable
+fun PreviewConnected() {
+    MQTTtestEMQXTheme {
+        ConnectionStatus(state = MqttManager.ConnectionState.CONNECTED)
+    }
+}
+
+@Preview(showBackground = true, name = "连接状态 - 连接中")
+@Composable
+fun PreviewConnecting() {
+    MQTTtestEMQXTheme {
+        ConnectionStatus(state = MqttManager.ConnectionState.CONNECTING)
+    }
+}
+
+@Preview(showBackground = true, name = "连接状态 - 已断开")
+@Composable
+fun PreviewDisconnected() {
+    MQTTtestEMQXTheme {
+        ConnectionStatus(state = MqttManager.ConnectionState.DISCONNECTED)
+    }
+}
+
+@Preview(showBackground = true, name = "发送消息区域")
+@Composable
+fun PreviewPublishSection() {
+    MQTTtestEMQXTheme {
+        PublishSection(
+            message = "测试消息",
+            onMessageChange = {},
+            onPublish = {},
+            isEnabled = true
+        )
+    }
+}
+
+@Preview(showBackground = true, name = "接收消息列表")
+@Composable
+fun PreviewReceivedMessages() {
+    MQTTtestEMQXTheme {
+        ReceivedMessages(
+            messages = listOf(
+                "收到消息: Hello World (来自: test/topic)",
+                "收到消息: MQTT测试 (来自: test/topic)",
+                "收到消息: 第三条消息 (来自: test/topic)"
+            )
+        )
+    }
+}
+
+@Preview(showBackground = true, name = "配置输入区域")
+@Composable
+fun PreviewConfigInput() {
+    MQTTtestEMQXTheme {
+        ConfigInputSection(
+            host = "a11331ff.ala.cn-hangzhou.emqxsl.cn",
+            port = "8883",
+            topic = "test/topic/from/android",
+            username = "kukudai",
+            password = "123456",
+            onHostChange = {},
+            onPortChange = {},
+            onTopicChange = {},
+            onUsernameChange = {},
+            onPasswordChange = {}
+        )
+    }
+}
+
+@Preview(showBackground = true, name = "配置显示区域")
+@Composable
+fun PreviewConfigDisplay() {
+    MQTTtestEMQXTheme {
+        ConfigDisplaySection(
+            host = "a11331ff.ala.cn-hangzhou.emqxsl.cn",
+            port = "8883",
+            topic = "test/topic/from/android",
+            username = "kukudai"
+        )
     }
 }
